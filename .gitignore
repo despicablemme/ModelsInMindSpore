@@ -1,0 +1,8 @@
+# directories
+
+*/.idea/
+*/__pycache__/
+*/rank_0
+
+# files
+*.h5s
