@@ -60,7 +60,7 @@ def train_net(args):
 if __name__ == '__main__':
 
     parser = arg.ArgumentParser(description='Mindspore SID Example')
-    parser.add_argument('--device_target', type=str, default='CPU',
+    parser.add_argument('--device_target', type=str, default='GPU',
                         help='device where the code will be implemented')
     parser.add_argument('--learning_rate', type=float, default=0.005)
     parser.add_argument('--decay', type=float, default=0.95)

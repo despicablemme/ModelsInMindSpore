@@ -99,43 +99,41 @@ class ConvNeXt(nn.Cell):
     """
     def __init__(self, in_channel=3,
                  num_classes=1000,
-                 depths=[3, 3, 9, 3],
-                 dims=[96, 192, 384, 768],
+                 depths=None,          # [3, 3, 9, 3]
+                 dims=None,            # [96, 192, 384, 768]
                  drop_path_rate=0.,
                  layer_scale_init_value=1e-6,
                  head_init_scale=1):
         super(ConvNeXt, self).__init__()
-        print(type(dims[-1]))
-        print(type(dims))
-        self.downsample_layers = nn.CellList()
+        if depths is None:
+            depths = [3, 3, 9, 3]
+        if dims is None:
+            dims = [96, 192, 384, 768]
+##################################################################################
+        self.down_sample_layers = nn.CellList()
         stem = nn.SequentialCell(
             nn.Conv2d(in_channel, dims[0], kernel_size=4, stride=4),
             LayerNorm(normalized_shape=dims[0],
                       eps=1e-6,
                       data_format="channels_first"))
-        self.downsample_layers.append(stem)
+        self.down_sample_layers.append(stem)
 
-        # 构建stage2-stage4的前三个downsample
+        # 构建stage2-stage4的前三个down_sample
         for i in range(3):
-            downsample_layer = nn.SequentialCell(
+            down_sample_layer = nn.SequentialCell(
                 LayerNorm(dims[i], eps=1e-6, data_format="channels_first"),
                 nn.Conv2d(dims[i], dims[i+1], kernel_size=2, stride=2),
             )
-            self.downsample_layers.append(downsample_layer)
+            self.down_sample_layers.append(down_sample_layer)
+##################################################################################
         # 存储每一个stage所构建的一系列block
         self.stages = nn.CellList()
         linspace = P.LinSpace()
         start = Tensor(0, ms.float32)
         ls = linspace(start, drop_path_rate, sum(depths))
-        print("====================")
-        print(ls)
-        print("=====================")
-        print(type(ls))
+
         dp_rates = [x.item((0, )) for x in linspace(start, drop_path_rate, sum(depths))]   # 等差数列
-        print("=================================")
-        print(dp_rates)
-        print("==================================")
-        print(type(dp_rates))
+
         cur = 0
         for i in range(4):
             stage = nn.SequentialCell(
@@ -148,31 +146,27 @@ class ConvNeXt(nn.Cell):
         self.norm = nn.LayerNorm([dims[-1], ], epsilon=1e-6)
         self.head = nn.Dense(dims[-1], num_classes)
 
+        self.head_init_scale = 1.0
+
         if config.initialize_mode == "Trunc":
-            # default_recurisive_init(self)
             self._init_weights()
-        self.head.weight.data * head_init_scale
-        self.head.bias.data * head_init_scale
-        # self.head.weight.set_data(init.initializer(init.Constant(layer_scale_init_value),
-        #                                            self.head.weight.shape,
-        #                                            self.head.weight.dtype))
-        # self.head.bias.set_data(init.initializer(init.Constant(layer_scale_init_value),
-        #                                          self.head.bias.shape,
-        #                                          self.head.bias.dtype))
+
+        # self.head.weight.data *= head_init_scale
+        # self.head.bias.data *= head_init_scale
 
     def _init_weights(self):
         for _, cell in self.cells_and_names():
-            if isinstance(cell, (nn.Conv2d, nn.Dense)):
+            if isinstance(cell, nn.Conv2d):
                 cell.weight.set_data(init.initializer(init.TruncatedNormal(),
                                                       cell.weight.shape,
                                                       cell.weight.dtype))
-                # cell.bias.set_data(init.initializer('zeros',
-                #                                     cell.bias.shape,
-                #                                     cell.bias.dtype))
+            if isinstance(cell, nn.Dense):
+                cell.weight.set_data(cell.weight.data * self.head_init_scale)
+                cell.bias.set_data(cell.bias.data * self.head_init_scale)
 
     def construct_feature(self, x):
         for i in range(4):
-            x = self.downsample_layers[i](x)
+            x = self.down_sample_layers[i](x)
             x = self.stages[i](x)
         return self.norm(x.mean([-2, -1]))      # global average pooling, (N, C, H, W) -> (N, C)
 
@@ -184,7 +178,9 @@ class ConvNeXt(nn.Cell):
 
 def convnext_tiny(pretrained=False, in_22k=False, **kwargs):
     model = ConvNeXt(depths=[3, 3, 9, 3], dims=[96, 192, 384, 768], **kwargs)
+    return model
 
 
 def convnext_xlarge(pretrained=False, in_22k=False, **kwargs):
     model = ConvNeXt(depths=[3, 3, 27, 3], dims=[256, 512, 1024, 2048], **kwargs)
+    return model

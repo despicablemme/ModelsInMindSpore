@@ -17,14 +17,12 @@ from mindspore.nn.metrics import Accuracy
 
 import os
 import time
-import datetime
-import zipfile
 
 set_seed(1)
 
 
 def modelarts_pre_process():
-    '''modelarts pre process function.'''
+    ''' modelarts pre process function. '''
     def unzip(zip_file, save_dir):
         import zipfile
         # path = os.path.join(config.data_path, config.modelarts_dataset_unzip_name + ".zip")
@@ -90,7 +88,7 @@ def modelarts_pre_process():
 
 @moxing_wrapper(pre_process=modelarts_pre_process)
 def run_train():
-    '''run train'''
+    ''' run train '''
     cfg = config
     context.set_context(mode=context.GRAPH_MODE, device_target=cfg.device_target)
     device_num = get_device_num()
@@ -113,27 +111,7 @@ def run_train():
                                               gradients_mean=True)
             device_id = get_rank()
     print("init finished")
-    # if not os.path.exists('/cache/data/ImageNet2012/train/'):
-    #     print('no such ImageNet2012/train file .')
-    # if not os.path.exists('/cache/data/ImageNet/train/'):
-    #     print('no such ImageNet/train file .')
-    # if not os.path.exists('/cache/data/imagenet/train/'):
-    #     print('no such imagenet/train file .')
-    # if not os.path.exists('/cache/data/imagenet2012/train/'):
-    #     print('no such imagenet2012/train file .')
-    # if not os.path.exists('/cache/data/ImageNet2012'):
-    #     print('no such ImageNet2012 file .')
-    # if not os.path.exists('/cache/data/ImageNet'):
-    #     print('no such ImageNet file .')
-    # if not os.path.exists('/cache/data/imagenet'):
-    #     print('no such imagenet file .')
-    # if not os.path.exists('/cache/data/imagenet2012'):
-    #     print('no such imagenet2012 file .')
-    # if config.dataset_name == "cifar100":
-    #     ds_train = create_dataset_cifar10(config,
-    #                                       config.train_data_path,
-    #                                       config.batch_size,
-    #                                       target=config.device_target)
+
     if config.dataset_name == "imagenet":
         ds_train = create_dataset_imagenet(cfg=config,
                                            dataset_path=config.train_data_path,
@@ -147,16 +125,18 @@ def run_train():
     net = convnext_tiny(pretrained=False,
                         in_22k=False)
     step_per_epoch = ds_train.get_dataset_size()
-    if config.dataset_naem == 'imagenet':
+
+    if config.dataset_name == 'imagenet':
         loss = nn.SoftmaxCrossEntropyWithLogits(sparse=True, reduction="mean")
         lr = Tensor(get_lr_imagenet(config.learning_rate, config.epoch_size, step_per_epoch))
         opt = nn.Adam(params=net.trainable_params(),
-                      learning_rate=4e-3,
+                      learning_rate=lr,   # 4e-3
                       beta1=0.9,
                       beta2=0.999,
                       eps=1e-7,
                       weight_decay=0.05,
                       loss_scale=1.0)
+
     metrics = {"Accuracy": Accuracy()}
     model = Model(net, loss_fn=loss, optimizer=opt, metrics=metrics)
 
@@ -174,15 +154,6 @@ def run_train():
                 train_dataset=ds_train,
                 callbacks=callbacks_list,
                 dataset_sink_mode=config.dataset_sink_mode)
-    # for m in net.trainable_params():
-    #     print(m)
-    # print("============================================")
-    # for m in net.parameters_and_names():
-    #     print(m)
-    # print("============================================")
-    # for m in net.get_parameters():
-    #     print(m)
-    # print("============================================")
 
 
 if __name__ == '__main__':

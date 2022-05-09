@@ -21,46 +21,6 @@ def _get_rank_info():
     return rank_size, rank_id
 
 
-def create_dataset_cifar10(cfg, data_path, batch_size=32, status="train",
-                           target="Ascend", num_parallel_workers=8):
-
-    ds.config.set_prefetch_size(64)
-    if target == "Ascend":
-        device_num, rank_id = _get_rank_info()
-
-    if target != "Ascend" or device_num == 1:
-        cifar_ds = ds.Cifar100Dataset(dataset_dir=data_path, shuffle=True)
-    else:
-        cifar_ds = ds.Cifar100Dataset(dataset_dir=data_path,
-                                      num_parallel_workers=num_parallel_workers,
-                                      shuffle=True,
-                                      num_shards=device_num,
-                                      shard_id=rank_id)
-    rescale = 1.0 / 255.0
-    shift = 0.0
-
-    # define map operations
-    resize_op = CV.Resize((cfg.image_height,cfg.image_width))
-    rescale_op = CV.Rescale(rescale, shift)
-    normalize_op = CV.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-    if status == "train":
-        random_crop_op = CV.RandomCrop([32, 32], [4, 4, 4, 4])
-        random_horizontal_op = CV.RandomHorizontalFlip()
-    channel_swap_op = CV.HWC2CHW()
-    typecast_op = C.TypeCast(mstype.int32)
-    cifar_ds = cifar_ds.map(input_columns="label", operations=typecast_op,
-                            num_parallel_workers=1)
-
-    if status == "train":
-        compose_op = [random_crop_op, random_horizontal_op, resize_op, rescale_op, normalize_op, channel_swap_op]
-    else:
-        compose_op = [resize_op, rescale_op, normalize_op, channel_swap_op]
-    cifar_ds = cifar_ds.map(input_columns="image", operations=compose_op, num_parallel_workers=num_parallel_workers)
-
-    cifar_ds = cifar_ds.batch(batch_size, drop_remainder=True)
-    return cifar_ds
-
-
 def create_dataset_imagenet(cfg, dataset_path, batch_size=32, repeat_num=1, training=True,
                             num_parallel_workers=16, shuffle=None, sampler=None, class_indexing=None):
     device_num, rank_id = _get_rank_info()

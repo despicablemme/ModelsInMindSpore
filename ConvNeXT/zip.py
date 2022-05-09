@@ -1,6 +1,6 @@
 import zipfile
 
-path='/home/work/user-job-dir/data/'
+path = '/home/work/user-job-dir/data/'
 
 # path = 'G:\项目\ConvNeXt-main.zip'
 if zipfile.is_zipfile(path):
@@ -10,5 +10,5 @@ if zipfile.is_zipfile(path):
     files = f.namelist()
     print(files)
     print("====================================================")
-else :
+else:
     print(321)

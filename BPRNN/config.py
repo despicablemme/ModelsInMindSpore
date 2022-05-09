@@ -9,7 +9,7 @@ class Configs:
         self.snr_h = 10
         self.snr_step = 1
         self.iterations = 5
-        self.code_file_name = 'bp-rnn-in-mind-spore/codes/BCH_63_45'   # code change
+        self.code_file_name = 'BPRNN/codes/BCH_63_45'   # code change
         self.H_file = self.code_file_name + '.alist'
         self.G_file = self.code_file_name + '.gmat'
         self.result_path = './result/'

@@ -22,23 +22,22 @@ import mindspore as ms
 
 import numpy as np
 
-form mindvision.engine.class_factory import ClassFactory, ModuleType
+from drop_path import DropPath, Identity
+from mindvision.engine.class_factory import ClassFactory, ModuleType
 
 __all__ = [
     "LayerNorm",
     "Block",
     "ConvNeXt",
-    "convnext_tiny",
-    "convnext_small",
-    "convnext_base",
-    "convnext_large",
-    "convnext_xlarge"
+    "ConvNeXtTiny",
+    "ConvNeXtSmall",
+    "ConvNeXtBase",
+    "ConvNeXtLarge",
+    "ConvNeXtxLarge"
 ]
-from src.drop_path import DropPath, Identity
-from src.model_utils.moxing_adapter import config
 
 
-class LayerNorm(nn.Cell):
+class LayerNormCell(nn.Cell):
     """
     LayerNorm that supports two data formats: channels_last (default) or channels_first.
     The ordering of the dimensions in the inputs. channels_last corresponds to inputs with
@@ -46,7 +45,7 @@ class LayerNorm(nn.Cell):
     with shape (batch_size, channels, height, width).
 
     Args:
-        normalized_shape: Normalization along axis.
+        normalized_shape(int): Normalization along axis.
         eps(float): A value added to the denominator for numerical stability. Default: 1e-7.
         data_format(str):channels_last corresponds to inputs with shape (batch_size, height, width, channels) while channels_first corresponds to inputs with shape (batch_size, channels, height, width).
 
@@ -54,25 +53,25 @@ class LayerNorm(nn.Cell):
         normalized x
 
     Examples:
-        >>> LayerNorm(normalized_shape=96, eps=1e-6, data_format="channels_last")
+        >>> LayerNormCell(normalized_shape=96, eps=1e-6, data_format="channels_last")
     """
     def __init__(self, normalized_shape, eps=1e-6, data_format="channels_last"):
-        super(LayerNorm, self).__init__()
+        super(LayerNormCell, self).__init__()
         self.weight = Parameter(np.ones(normalized_shape))
         self.bias = Parameter(np.zeros(normalized_shape))
         self.eps = eps
         self.data_format = data_format
         if self.data_format not in ["channels_last", "channels_first"]:
             raise NotImplementedError
-        self.normalized_shape = (normalized_shape, )
+        self.normalized_shape = (normalized_shape,)
 
     def construct(self, x):
         if self.data_format == "channels_last":
             return P.LayerNorm(input_x=x, gamma=self.weight,
                                beta=self.bias, epsilon=self.eps)
         elif self.data_format == "channels_first":
-            mean = x.mean(1, keepdim=True)     # 在channel维度求均值
-            var = (x - mean).pow(2).mean(1, keepdim=True)  # 求方差
+            mean = x.mean(1, keepdim=True)
+            var = (x - mean).pow(2).mean(1, keepdim=True)
             x = (x - mean) / np.sqrt(var + self.eps)
             x = self.weight[:, None, None] * x + self.bias[:, None, None]
             return x
@@ -80,34 +79,32 @@ class LayerNorm(nn.Cell):
 
 class Block(nn.Cell):
     """
-    ConvNext block definition. There are two equivalent implementations:
+    ConvNext Block. There are two equivalent implementations:
     (1) DwConv -> layernorm(channel_first)->1*1 Conv —>GELU -> 1*1 Conv,all in (N, C, H, W);
     (2) DwConv -> Permute to (NHWC), layernorm(channels_last) -> Dense -> GELU -> Dense,
     permute back to (NCHW). We use (2).
 
     Args:
-        dim(int): Number of input channels.
-        drop_path(float): Stochastic depth rate. Default: 0.0
-        layer_scale_init_value(float): Init value for Layer Scale. Default: 1e-6.
+        dim(int):Number of input channels.
+        drop_path(float): Stochastic depth rate. Default:0.0
+        layer_scale_init_value(float): Init value for Layer Scale. Default:1e-6
 
     Returns:
-        Tensor, x tensor.
+        tensor
 
     Examples:
-        >>>from mindvision.classification.models.backbons import Block
-        >>>Block(dim=96, drop_path=0.0, layer_scale_init_value=1e-6)
+        >>> from mindvision.classification.models.backbones import Block
+        >>> Block(dim=3, drop_path=0, layer_scale_init_value=1e-6)
     """
-
     def __init__(self, dim, drop_path=0., layer_scale_init_value=1e-6):
         super(Block, self).__init__()
         self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, pad_mode="pad", padding=3, group=dim)
-        self.norm = LayerNorm(dim, eps=1e-6, data_format="channel_last")
+        self.norm = LayerNormCell(dim, eps=1e-6, data_format="channel_last")
         self.pwconv1 = nn.Dense(dim, 4 * dim)
         self.act = nn.GELU()
         self.pwconv2 = nn.Dense(4 * dim, dim)
-        self.gamma = Parameter(layer_scale_init_value * np.ones((dim)),
+        self.gamma = Parameter(layer_scale_init_value * np.ones((dim,)),
                                requires_grad=True) if layer_scale_init_value > 0 else None
-        # drop_path 当drop_path>0时将多分支结构随机失活，否则是个恒等映射
         self.drop_path = DropPath(drop_path) if drop_path > 0. else Identity
 
     def construct(self, x):
@@ -169,8 +166,8 @@ class ConvNeXt(nn.Cell):
      .. code-block::
 
         @article{,
-        title={},
-        author={},
+        title={A ConvNet for the 2020s},
+        author={Zhuang, Liu. and Hanzi, Mao. and Chao-Yuan, Wu.},
         journal={},
         year={}
         }
@@ -178,14 +175,18 @@ class ConvNeXt(nn.Cell):
 
     def __init__(self, in_channel=3,
                  num_classes=1000,
-                 depths=[3, 3, 9, 3],
-                 dims=[96, 192, 384, 768],
+                 depths=None,
+                 dims=None,
                  drop_path_rate=0.,
                  layer_scale_init_value=1e-6,
-                 head_init_scale=1):
+                 head_init_scale=1.0):
         super(ConvNeXt, self).__init__()
-        print(type(dims[-1]))
-        print(type(dims))
+
+        if depths is None:
+            depths = [3, 3, 9, 3]
+        if dims is None:
+            dims = [96, 192, 384, 768]
+
         self.downsample_layers = nn.CellList()
         stem = nn.SequentialCell(
             nn.Conv2d(in_channel, dims[0], kernel_size=4, stride=4),
@@ -205,16 +206,7 @@ class ConvNeXt(nn.Cell):
         self.stages = nn.CellList()
         linspace = P.LinSpace()
         start = Tensor(0, ms.float32)
-        ls = linspace(start, drop_path_rate, sum(depths))
-        print("====================")
-        print(ls)
-        print("=====================")
-        print(type(ls))
-        dp_rates = [x.item((0, )) for x in linspace(start, drop_path_rate, sum(depths))]   # 等差数列
-        print("=================================")
-        print(dp_rates)
-        print("==================================")
-        print(type(dp_rates))
+        dp_rates = [x.item((0, )) for x in linspace(start, drop_path_rate, sum(depths))]
         cur = 0
         for i in range(4):
             stage = nn.SequentialCell(
@@ -227,120 +219,110 @@ class ConvNeXt(nn.Cell):
         self.norm = nn.LayerNorm([dims[-1], ], epsilon=1e-6)
         self.head = nn.Dense(dims[-1], num_classes)
 
-        if config.initialize_mode == "Trunc":
-            # default_recurisive_init(self)
-            self._init_weights()
-        self.head.weight.data * head_init_scale
-        self.head.bias.data * head_init_scale
-        # self.head.weight.set_data(init.initializer(init.Constant(layer_scale_init_value),
-        #                                            self.head.weight.shape,
-        #                                            self.head.weight.dtype))
-        # self.head.bias.set_data(init.initializer(init.Constant(layer_scale_init_value),
-        #                                          self.head.bias.shape,
-        #                                          self.head.bias.dtype))
-
-    def _init_weights(self):
         for _, cell in self.cells_and_names():
-            if isinstance(cell, (nn.Conv2d, nn.Dense)):
+            if isinstance(cell, nn.Conv2d):
                 cell.weight.set_data(init.initializer(init.TruncatedNormal(),
                                                       cell.weight.shape,
                                                       cell.weight.dtype))
-                # cell.bias.set_data(init.initializer('zeros',
-                #                                     cell.bias.shape,
-                #                                     cell.bias.dtype))
+            if isinstance(cell, nn.Dense):
+                cell.weight.set_data(cell.weight.data * head_init_scale)
+                cell.bias.set_data(cell.bias.data * head_init_scale)
+
+        self.reduce_mean = P.ReduceMean()
 
     def construct_feature(self, x):
         for i in range(4):
             x = self.downsample_layers[i](x)
             x = self.stages[i](x)
-        return self.norm(x.mean([-2, -1]))      # global average pooling, (N, C, H, W) -> (N, C)
+        return self.norm(self.reduce_mean(x, [-2, -1]))      # global average pooling, (N, C, H, W) -> (N, C)
 
     def construct(self, x):
         x = self.construct_feature(x)
         x = self.head(x)
         return x
 
+
 @ClassFactory.register(ModuleType.BACKBONE)
-class convnext_tiny(ConvNeXt):
+class ConvNeXtTiny(ConvNeXt):
     """
     This class of convnext_tiny.
 
     Examples:
-        >>> from mindvision.classification.models.backbones import ConvNext
+        >>> from mindvision.classification.models.backbones import ConvNeXt
         >>> import numpy as np
-        >>> net = convnext_tiny(ConvNext)
+        >>> net = ConvNeXtTiny(ConvNeXt)
         >>> x = np.random.randn(32*3*224*224).reshape(32, 3, 224, 224)
         >>> output = net(x)
         >>> print(output.shape)
     """
     def __init__(self, **kwargs):
-        super(convnext_tiny, self).__init__(depths=[3, 3, 9, 3], dims=[96, 192, 384, 768],  **kwargs)
+        super(ConvNeXtTiny, self).__init__(depths=[3, 3, 9, 3], dims=[96, 192, 384, 768],  **kwargs)
 
 
 @ClassFactory.register(ModuleType.BACKBONE)
-class convnext_small(ConvNeXt):
+class ConvNeXtSmall(ConvNeXt):
     """
     This class of convnext_small.
 
     Examples:
-        >>> from mindvision.classification.models.backbones import ConvNext
+        >>> from mindvision.classification.models.backbones import ConvNeXt
         >>> import numpy as np
-        >>> net = convnext_small(ConvNext)
+        >>> net = ConvNeXtSmall(ConvNeXt)
         >>> x = np.random.randn(32*3*224*224).reshape(32, 3, 224, 224)
         >>> output = net(x)
         >>> print(output.shape)
     """
     def __init__(self, **kwargs):
-        super(convnext_small, self).__init__(depths=[3, 3, 27, 3], dims=[96, 192, 384, 768], **kwargs)
+        super(ConvNeXtSmall, self).__init__(depths=[3, 3, 27, 3], dims=[96, 192, 384, 768], **kwargs)
 
 
 @ClassFactory.register(ModuleType.BACKBONE)
-class convnext_base(ConvNeXt):
+class ConvNeXtBase(ConvNeXt):
     """
     This class of convnext_base.
 
     Examples:
-        >>> from mindvision.classification.models.backbones import ConvNext
+        >>> from mindvision.classification.models.backbones import ConvNeXt
         >>> import numpy as np
-        >>> net = convnext_base(ConvNext)
+        >>> net = ConvNeXTBase(ConvNeXt)
         >>> x = np.random.randn(32*3*224*224).reshape(32, 3, 224, 224)
         >>> output = net(x)
         >>> print(output.shape)
     """
     def __init__(self, **kwargs):
-        super(convnext_base, self).__init__(depths=[3, 3, 27, 3], dims=[128, 256, 512, 1024], **kwargs)
+        super(ConvNeXtBase, self).__init__(depths=[3, 3, 27, 3], dims=[128, 256, 512, 1024], **kwargs)
 
 
 @ClassFactory.register(ModuleType.BACKBONE)
-class convnext_large(ConvNeXt):
+class ConvNeXtLarge(ConvNeXt):
     """
     This class of convnext_large.
 
     Examples:
-        >>> from mindvision.classification.models.backbones import ConvNext
+        >>> from mindvision.classification.models.backbones import ConvNeXt
         >>> import numpy as np
-        >>> net = convnext_large(ConvNext)
+        >>> net = ConvNeXtLarge(ConvNeXt)
         >>> x = np.random.randn(32*3*224*224).reshape(32, 3, 224, 224)
         >>> output = net(x)
         >>> print(output.shape)
     """
     def __init__(self, **kwargs):
-        super(convnext_large, self).__init__(depths=[3, 3, 27, 3], dims=[192, 384, 768, 1536], **kwargs)
+        super(ConvNeXtLarge, self).__init__(depths=[3, 3, 27, 3], dims=[192, 384, 768, 1536], **kwargs)
 
 
 @ClassFactory.register(ModuleType.BACKBONE)
-class convnext_xlarge(ConvNeXt):
+class ConvNeXtxLarge(ConvNeXt):
     """
     This class of convnext_xlarge.
 
     Examples:
-        >>> from mindvision.classification.models.backbones import ConvNext
+        >>> from mindvision.classification.models.backbones import ConvNeXt
         >>> import numpy as np
-        >>> net = convnext_xlarge(ConvNext)
+        >>> net = ConvNeXtxLarge(ConvNeXt)
         >>> x = np.random.randn(32*3*224*224).reshape(32, 3, 224, 224)
         >>> output = net(x)
         >>> print(output.shape)
     """
 
     def __init__(self, **kwargs):
-        super(convnext_xlarge, self).__init__(depths=[3, 3, 27, 3], dims=[256, 512, 1024, 2048], **kwargs)
+        super(ConvNeXtxLarge, self).__init__(depths=[3, 3, 27, 3], dims=[256, 512, 1024, 2048], **kwargs)
