@@ -1,7 +1,5 @@
 import mindspore as ms
 import mindspore.nn.probability.distribution as msd
-from mindspore.ops import Div as div
-from mindspore.numpy import empty_like
 from mindspore import nn, Parameter, Tensor
 from mindspore.ops import operations as P
 import numpy as np
@@ -32,23 +30,26 @@ class ConvNeXt(nn.Cell):
         self.start_cell = nn.SequentialCell([nn.Conv2d(in_channels, dims[0], 4, 4),
                                              nn.LayerNorm(normalized_shape=(dims[0], im_size, im_size),
                                                           begin_norm_axis=1,
-                                                          begin_params_axis=1)])   # todo layer norm
+                                                          begin_params_axis=1)])
 
         linspace = P.LinSpace()
         start = Tensor(0, ms.float32)
         dp_rates = [x.item((0,)) for x in linspace(start, drop_path_rate, sum(depths))]
+        print(len(dp_rates))       # TODO
+        print("dp_rates", dp_rates)
 
         self.block1 = nn.SequentialCell([ConvNeXtBlock(dim=dims[0],
                                                        out_size=im_size,
                                                        drop_path=dp_rates[j],
                                                        layer_scale=layer_scale)
                                          for j in range(depths[0])])
-        del dp_rates[: depths[0]+1]
+        del dp_rates[: depths[0]]
+        print(len(dp_rates))
 
-        down_sample_blocks_list = nn.CellList()
+        down_sample_blocks_list = []
         for i in range(3):
-            im_size = im_size // 2
-            down_sample = DownSample(in_channels=dims[i], out_channels=dims[i], out_size=im_size)
+            down_sample = DownSample(in_channels=dims[i], out_channels=dims[i+1], out_size=im_size)
+            im_size = im_size // 2      # todo
             down_sample_blocks_list.append(down_sample)
             block = nn.SequentialCell([ConvNeXtBlock(dim=dims[i+1],
                                                      out_size=im_size,
@@ -56,7 +57,8 @@ class ConvNeXt(nn.Cell):
                                                      layer_scale=layer_scale)
                                        for j in range(depths[i+1])])
             down_sample_blocks_list.append(block)
-            del dp_rates[: depths[i+1] + 1]
+            del dp_rates[: depths[i+1]]
+            print(len(dp_rates), i)
         self.down_sample_blocks = nn.SequentialCell(down_sample_blocks_list)
 
     def construct(self, x):
@@ -95,21 +97,27 @@ class ConvNeXtBlock(nn.Cell):
                                        begin_norm_axis=1,
                                        begin_params_axis=1,
                                        epsilon=1e-6)
+        self.transpose = P.Transpose()
         self.pwconv1 = nn.Dense(dim, 4 * dim)
         self.acti = nn.GELU()
         self.pwconv2 = nn.Dense(4 * dim, dim)
-        self.gamma = Parameter(layer_scale * np.ones((dim,)), requires_grad=True) if layer_scale > 0 else None
-        self.drop_path = DropPathConvNeXt(drop_path) if drop_path > 0. else Identity
+        # todo
+        if layer_scale > 0:
+            self.gamma = Parameter(Tensor(layer_scale * np.ones((dim,)), dtype=ms.float32), requires_grad=True)
+        else:
+            self.gamma = Parameter(Tensor(np.ones((dim,)), dtype=ms.float32), requires_grad=False)
+        self.drop_path = DropPathConvNeXt(drop_path)
 
     def construct(self, x):
         shortcut = x
         x = self.dwconv(x)
         x = self.layer_norm(x)
+        x = self.transpose(x, (0, 2, 3, 1))
         x = self.pwconv1(x)
         x = self.acti(x)
         x = self.pwconv2(x)
-        if self.gamma is not None:
-            x = self.gamma * x
+        x = self.gamma * x
+        x = self.transpose(x, (0, 3, 1, 2))
         x = shortcut + self.drop_path(x)
         return x
 
@@ -141,11 +149,11 @@ class DownSample(nn.Cell):
                  eps: float = 1e-6,
                  ):
         super(DownSample, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride)
-        self.layer_norm = nn.LayerNorm(normalized_shape=(out_channels, out_size, out_size),
+        self.layer_norm = nn.LayerNorm(normalized_shape=(in_channels, out_size, out_size),  # todo
                                        begin_norm_axis=1,
                                        begin_params_axis=1,
                                        epsilon=eps)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride)
 
     def construct(self, x):
         """DownSample forward construct"""
@@ -159,7 +167,7 @@ class DropPathConvNeXt(nn.Cell):
     DropPath function.
 
     Args:
-        drop_prob(int): Drop rate. Default:0
+        drop_prob(float): Drop rate. Default:0.0
         training(bool): Determine whether to train. Default: False.
         scale_by_keep(bool): Determine whether to scale. Default: True.
 
@@ -167,27 +175,22 @@ class DropPathConvNeXt(nn.Cell):
         Tensor
     """
 
-    def __init__(self, drop_prob=0.0, training=False, scale_by_keep=True):
+    def __init__(self, drop_prob=0.0, scale_by_keep=True):
         super(DropPathConvNeXt, self).__init__()
         self.drop_prob = drop_prob
         self.keep_prob = 1 - self.drop_prob
+        if self.keep_prob == 1.0:
+            self.keep_prob = 0.9999
         self.scale_by_keep = scale_by_keep
-        self.probs = self.keep_prob
-        self.bernoulli = msd.Bernoulli(probs=self.probs)
-        self.training = training
+        self.bernoulli = msd.Bernoulli(probs=self.keep_prob)
+        self.div = P.Div()
 
     def construct(self, x):
-        if self.drop_prob == 0 or not self.training:
-            return x
-        random_tensor = self.bernoulli.sample(empty_like((x.shape[0], ) + (1, ) * (x.ndim - 1)))
-        if self.keep_prob > 0.0 and self.scale_by_keep:
-            random_tensor = div(random_tensor, self.keep_prob)
-        return x * random_tensor
+        if self.drop_prob > 0.0 or self.training:
 
+            random_tensor = self.bernoulli.sample((x.shape[0], ) + (1, ) * (x.ndim - 1))
+            if self.keep_prob > 0.0 and self.scale_by_keep:
+                random_tensor = self.div(random_tensor, self.keep_prob)
+            x = x * random_tensor
 
-class Identity(nn.Cell):
-    def __init__(self):
-        super(Identity, self).__init__()
-
-    def construct(self, x):
         return x
