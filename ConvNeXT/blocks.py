@@ -164,11 +164,10 @@ class DownSample(nn.Cell):
 
 class DropPathConvNeXt(nn.Cell):
     """
-    DropPath function.
+    DropPath function for ConvNeXt.
 
     Args:
-        drop_prob(float): Drop rate. Default:0.0
-        training(bool): Determine whether to train. Default: False.
+        drop_prob(float): Drop rate, (0, 1). Default:0.0
         scale_by_keep(bool): Determine whether to scale. Default: True.
 
     Returns:
@@ -178,7 +177,7 @@ class DropPathConvNeXt(nn.Cell):
     def __init__(self, drop_prob=0.0, scale_by_keep=True):
         super(DropPathConvNeXt, self).__init__()
         self.drop_prob = drop_prob
-        self.keep_prob = 1 - self.drop_prob
+        self.keep_prob = 1.0 - self.drop_prob
         if self.keep_prob == 1.0:
             self.keep_prob = 0.9999
         self.scale_by_keep = scale_by_keep
@@ -186,9 +185,8 @@ class DropPathConvNeXt(nn.Cell):
         self.div = P.Div()
 
     def construct(self, x):
-        if self.drop_prob > 0.0 or self.training:
-
-            random_tensor = self.bernoulli.sample((x.shape[0], ) + (1, ) * (x.ndim - 1))
+        if self.drop_prob > 0.0 and self.training:
+            random_tensor = self.bernoulli.sample((x.shape[0],) + (1,) * (x.ndim - 1))
             if self.keep_prob > 0.0 and self.scale_by_keep:
                 random_tensor = self.div(random_tensor, self.keep_prob)
             x = x * random_tensor
