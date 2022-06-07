@@ -1,9 +1,0 @@
-[WARNING] KERNEL(6133,7fe367d7d600,python):2022-05-12-12:46:46.935.373 [mindspore/ccsrc/backend/kernel_compiler/gpu/gpu_kernel_factory.cc:96] ReducePrecision] Kernel [UniformReal] does not support int64, cast input 0 to int32.
-[WARNING] PRE_ACT(6133,7fe367d7d600,python):2022-05-12-12:46:46.935.504 [mindspore/ccsrc/backend/optimizer/gpu/reduce_precision_fusion.cc:83] Run] Reduce precision for [UniformReal] input 0
-18
-dp_rates [Tensor(shape=[], dtype=Float32, value= 0), Tensor(shape=[], dtype=Float32, value= 0.0294118), Tensor(shape=[], dtype=Float32, value= 0.0588235), Tensor(shape=[], dtype=Float32, value= 0.0882353), Tensor(shape=[], dtype=Float32, value= 0.117647), Tensor(shape=[], dtype=Float32, value= 0.147059), Tensor(shape=[], dtype=Float32, value= 0.176471), Tensor(shape=[], dtype=Float32, value= 0.205882), Tensor(shape=[], dtype=Float32, value= 0.235294), Tensor(shape=[], dtype=Float32, value= 0.264706), Tensor(shape=[], dtype=Float32, value= 0.294118), Tensor(shape=[], dtype=Float32, value= 0.323529), Tensor(shape=[], dtype=Float32, value= 0.352941), Tensor(shape=[], dtype=Float32, value= 0.382353), Tensor(shape=[], dtype=Float32, value= 0.411765), Tensor(shape=[], dtype=Float32, value= 0.441176), Tensor(shape=[], dtype=Float32, value= 0.470588), Tensor(shape=[], dtype=Float32, value= 0.5)]
-15
-12 0
-3 1
-0 2
-(1, 768, 7, 7)

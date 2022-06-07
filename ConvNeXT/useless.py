@@ -1,5 +1,5 @@
 import mindspore.ops as P
-from minspore import nn
+from mindspore import nn
 
 
 class DropPath(nn.Cell):
@@ -25,3 +25,11 @@ class DropPath(nn.Cell):
             x = x * random_tensor
 
         return x
+
+
+name = 'backbone.down_sample_blocks.1.0.dwconv.weight'
+name_split = name.split('.')
+print(name_split)
+print(int(name_split[2]))
+if name_split[2] in ['0', '1']:
+    print(True)
